@@ -1,0 +1,196 @@
+// Al Zaytouna — restaurant ordering site
+// Money is stored as Int in agorot (1 shekel = 100 agorot) to avoid float drift.
+
+generator client {
+  provider = "prisma-client"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum OrderType {
+  DELIVERY
+  PICKUP
+}
+
+enum OrderStatus {
+  PENDING
+  CONFIRMED
+  PREPARING
+  READY
+  OUT_FOR_DELIVERY
+  COMPLETED
+  CANCELLED
+}
+
+/// Single-row table holding everything the owner can edit from /admin.
+model Settings {
+  id        String  @id @default("default")
+  name      String  @default("مطعم الزيتونة")
+  tagline   String?
+  story     String?
+  address   String  @default("")
+  city      String?
+  phone     String?
+  whatsapp  String  @default("")
+  instagram String?
+  facebook  String?
+  tiktok    String?
+  email     String?
+  mapUrl    String?
+currency    String @default("₪")
+
+  /// IANA zone used for every "open now" calculation, e.g. Asia/Jerusalem.
+  timezone    String @default("Asia/Jerusalem")
+
+  /// { "0": { "open": "10:00", "close": "23:00" }, ... } keyed by JS day 0=Sunday.
+  /// A day set to null is closed.
+  openingHours  Json @default("{}")
+  /// Same shape, for when the kitchen accepts orders.
+  orderingHours Json @default("{}")
+
+  deliveryFee   Int     @default(0)
+  minOrder      Int     @default(0)
+  deliveryAreas String?
+  etaMinutes    Int?
+
+  logoImageId String?
+  logoImage   Image?  @relation("SettingsLogo", fields: [logoImageId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Category {
+  id        String   @id @default(cuid())
+  name      String
+  sortOrder Int      @default(0)
+  dishes    Dish[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([sortOrder])
+}
+
+model Dish {
+  id         String   @id @default(cuid())
+  categoryId String
+  category   Category @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+
+  name        String
+  /// URL segment for /menu/[slug]. Latin where possible so links stay readable.
+  slug        String   @unique
+  description String?
+  /// Price in agorot.
+  price       Int
+  /// Optional discounted price in agorot, used while an active Special exists.
+  offerPrice  Int?
+
+  imageId String?
+  image   Image?  @relation("DishPhoto", fields: [imageId], references: [id], onDelete: SetNull)
+
+  available Boolean @default(true)
+  featured  Boolean @default(false)
+  sortOrder Int     @default(0)
+
+  specials   Special[]
+  orderItems OrderItem[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([categoryId, sortOrder])
+  @@index([featured])
+  @@index([available])
+}
+
+/// A time-boxed discounted price on a dish.
+model Special {
+  id     String @id @default(cuid())
+  dishId String
+  dish   Dish   @relation(fields: [dishId], references: [id], onDelete: Cascade)
+
+  /// Discounted price in agorot.
+  offerPrice Int
+  label      String?
+  startsAt   DateTime?
+  expiresAt  DateTime?
+  active     Boolean   @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([dishId])
+  @@index([active, expiresAt])
+}
+
+/// Site-wide banner, e.g. "closed for Eid" or a holiday offer.
+model Announcement {
+  id        String    @id @default(cuid())
+  body      String
+  active    Boolean   @default(false)
+  startsAt  DateTime?
+  expiresAt DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+}
+
+model Order {
+  id        String      @id @default(cuid())
+  reference String      @unique
+  type      OrderType
+  status    OrderStatus @default(PENDING)
+
+  customerName String
+  phone        String
+  address      String?
+  notes        String?
+
+  /// Agorot. Includes delivery fee.
+  subtotal Int
+  fee      Int @default(0)
+  total    Int
+
+  /// False until the customer has actually sent the WhatsApp message.
+  whatsappSent Boolean @default(false)
+
+  items     OrderItem[]
+  createdAt DateTime    @default(now())
+  updatedAt DateTime    @updatedAt
+
+  @@index([status])
+  @@index([createdAt])
+}
+
+model OrderItem {
+  id      String @id @default(cuid())
+  orderId String
+  order   Order  @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  dishId    String?
+  dish      Dish?   @relation(fields: [dishId], references: [id], onDelete: SetNull)
+  /// Denormalised so historical orders survive menu edits.
+  dishName  String
+  unitPrice Int
+  quantity  Int
+  lineTotal Int
+
+  @@index([orderId])
+  @@index([dishId])
+}
+
+model Image {
+  id        String   @id @default(cuid())
+  filename  String   @unique
+  mime      String
+  sizeBytes Int
+  width     Int?
+  height    Int?
+  alt       String?
+  createdAt DateTime @default(now())
+
+  dishes  Dish[]     @relation("DishPhoto")
+  logoFor Settings[] @relation("SettingsLogo")
+}

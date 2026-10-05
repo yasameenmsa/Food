@@ -39,3 +39,15 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+/src/generated/prisma
+/generated/prisma
+
+# prisma local dev database (PGlite)
+/.local-pg/
+
+# uploaded dish photos and other runtime data
+/.data/
+
+# docker
+/compose.override.yml

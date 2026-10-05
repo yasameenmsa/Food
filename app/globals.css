@@ -1,26 +1,133 @@
 @import "tailwindcss";
 
+/*
+ * معجنات الزيتونة — design tokens.
+ *
+ * Values come from brand-style.md, which was read off the original banner:
+ * one dominant olive + cream, orange strictly as a small accent. Every
+ * component reads from these tokens, never a raw hex.
+ */
+@theme {
+  --color-cream: #fcebd9; /* --bg */
+  --color-surface: #fff6ec;
+  --color-olive: #4a4a28; /* --primary */
+  --color-olive-soft: #6e6e3c; /* --secondary */
+  --color-ember: #d9822b; /* --accent */
+  --color-accent: #d9822b;
+  --color-brown: #7a4420;
+  --color-stone: #d8c4a0;
+  --color-gold: #d4a056;
+
+  /* Status colours for order/admin states. Kept outside the brand palette on
+     purpose: these need to read as "state", not as decoration. */
+  --color-success: #3f6212;
+  --color-warning: #a16207;
+  --color-danger: #b42318;
+
+  --font-sans: var(--font-body), system-ui, sans-serif;
+  --font-display: var(--font-display), system-ui, sans-serif;
+
+  --radius-sm: 6px;
+  --radius-card: 10px;
+  --radius-lg: 20px;
+
+  /* Olive-tinted, never black. */
+  --shadow-brand: 0 4px 14px rgb(74 74 40 / 0.12);
+  --shadow-lift: 0 10px 28px rgb(74 74 40 / 0.18);
+}
+
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: var(--color-cream);
+  --foreground: var(--color-olive);
+  --surface: var(--color-surface);
+  --border: var(--color-stone);
+  --muted: var(--color-olive-soft);
+  --brand: var(--color-olive);
+  --brand-foreground: var(--color-cream);
+  --accent: var(--color-ember);
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --color-line: var(--border);
+  --color-muted: var(--muted);
+  --color-brand: var(--brand);
+  --color-brand-foreground: var(--brand-foreground);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+* {
+  border-color: var(--border);
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-sans);
+  /* Arabic reads better with generous line height — brand-style.md says 1.7. */
+  line-height: 1.7;
+}
+
+h1,
+h2,
+h3 {
+  font-family: var(--font-display);
+  /* No letter-spacing on Arabic, ever. */
+  letter-spacing: 0;
+}
+
+/* Prices, phone numbers and quantities: Latin digits, always LTR even when they
+   sit inside an Arabic sentence. */
+.nums {
+  font-variant-numeric: tabular-nums;
+  direction: ltr;
+  unicode-bidi: isolate;
+}
+
+/* Same idea for inline LTR runs like URLs and handles. */
+.ltr-run {
+  direction: ltr;
+  unicode-bidi: isolate;
+  display: inline-block;
+}
+
+.link-underline {
+  text-decoration: underline;
+  text-underline-offset: 4px;
+  text-decoration-thickness: 1px;
+}
+
+/* Thin olive rule between sections, per the brand's divider ornament. */
+.olive-rule {
+  border: 0;
+  border-top: 1px solid var(--color-olive);
+  opacity: 0.6;
+}
+
+/* Hide the scrollbar on the horizontal category rail. */
+.no-scrollbar {
+  scrollbar-width: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+/* A single, consistent focus ring on everything keyboard-reachable. */
+:where(a, button, input, select, textarea, [tabindex]):focus-visible {
+  outline: 2px solid var(--color-ember);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }
