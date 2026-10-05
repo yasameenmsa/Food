@@ -1,11 +1,21 @@
 "use server";
 
-import { revalidatePath } from "next/cache";
+import { revalidatePath, updateTag } from "next/cache";
+import {
+  ALL_CATALOG_TAGS,
+  TAG_ANNOUNCEMENTS,
+  TAG_CATALOG,
+  TAG_CATEGORIES,
+  TAG_DISHES,
+  TAG_SETTINGS,
+} from "@/lib/cache-tags";
 import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/auth";
 import { parseAgorot } from "@/lib/money";
 import { resolveSlug } from "@/lib/slug";
+import { dishSearchKey } from "@/lib/search";
+import { storeUpload, UploadError } from "@/lib/uploads";
 import { parseHours, isValidTime } from "@/lib/hours";
 import { setOrderStatus, markWhatsappSent } from "@/lib/orders";
 import { ORDER_STATUS_VALUES } from "@/lib/order-status";
@@ -16,6 +26,32 @@ async function guard(path: string) {
   await requireSession(path);
 }
 
+/**
+ * The storefront is ISR, so admin writes invalidate by cache tag. The previous
+ * `revalidatePath("/menu")` calls were no-ops: the routes they named were forced
+ * dynamic by the session cookie, so they never had a cache entry to drop.
+ *
+ * `updateTag` rather than `revalidateTag`: every call site is a Server Action,
+ * and this is a read-your-own-writes case — the owner saves a dish and expects
+ * to see it, not to wait for a background revalidation. `revalidateTag` serves
+ * stale content while it refreshes, which would look like the save failed.
+ *
+ * `revalidatePath` still fires for the admin's own pages, which *are* dynamic.
+ */
+function invalidate(
+  tags: readonly string[],
+  paths: readonly string[] = DEFAULT_PATHS,
+) {
+  for (const tag of tags) updateTag(tag);
+  for (const path of paths) revalidatePath(path);
+}
+
+const DEFAULT_PATHS: readonly string[] = ["/admin"];
+
+const DISHES = [TAG_DISHES, TAG_CATALOG] as const;
+const CATEGORIES = [TAG_CATEGORIES, TAG_CATALOG] as const;
+const EVERYTHING = ALL_CATALOG_TAGS;
+
 function text(formData: FormData, key: string): string {
   return String(formData.get(key) ?? "").trim();
 }
@@ -23,6 +59,16 @@ function text(formData: FormData, key: string): string {
 function optional(formData: FormData, key: string): string | null {
   const value = text(formData, key);
   return value.length > 0 ? value : null;
+}
+
+/**
+ * Position within the dish's category. Clamped to a sane range so a typo or a
+ * pasted value cannot push a dish off the end of the menu forever.
+ */
+function parseSortOrder(raw: FormDataEntryValue | null): number {
+  const parsed = Number.parseInt(String(raw ?? ""), 10);
+  if (!Number.isInteger(parsed)) return 0;
+  return Math.min(9999, Math.max(0, parsed));
 }
 
 /* ------------------------------------------------------------------ orders */
@@ -70,50 +116,65 @@ export async function saveDish(
   const price = parseAgorot(text(formData, "price"));
   if (price === null || price <= 0) errors.price = "أدخل سعرًا صحيحًا.";
 
-  const offerRaw = text(formData, "offerPrice");
-  let offerPrice: number | null = null;
-  if (offerRaw) {
-    const parsed = parseAgorot(offerRaw);
-    if (parsed === null || parsed <= 0) {
-      errors.offerPrice = "السعر المخفّض غير صحيح.";
-    } else if (price !== null && parsed >= price) {
-      errors.offerPrice = "السعر المخفّض يجب أن يكون أقل من السعر الأصلي.";
-    } else {
-      offerPrice = parsed;
-    }
-  }
-
   if (Object.keys(errors).length > 0) {
     return { ok: false, message: "راجع الحقول المميزة.", errors };
   }
 
   const slug = resolveSlug(name, optional(formData, "slug"));
+  const description = optional(formData, "description");
+
+  // A new photo, if one was chosen. Stored before the dish row so a rejected
+  // upload never leaves a half-updated dish behind.
+  let imageId: string | null | undefined;
+  const file = formData.get("photo");
+  if (file instanceof File && file.size > 0) {
+    try {
+      const stored = await storeUpload(file, optional(formData, "alt"));
+      imageId = stored.imageId;
+    } catch (error) {
+      const message =
+        error instanceof UploadError
+          ? error.message
+          : "تعذر رفع الصورة. حاول مرة أخرى.";
+      return { ok: false, message, errors: { photo: message } };
+    }
+  }
 
   const data = {
     name,
     slug,
     categoryId,
-    description: optional(formData, "description"),
+    description,
     price: price!,
-    offerPrice,
+    // Maintained here rather than by a database default, so search can never
+    // drift from the text the owner actually typed.
+    searchKey: dishSearchKey(name, description),
+    sortOrder: parseSortOrder(formData.get("sortOrder")),
     available: formData.get("available") === "on",
     featured: formData.get("featured") === "on",
+    // `undefined` means "leave it alone"; `null` would detach the photo.
+    ...(imageId ? { imageId } : {}),
   };
 
   if (id) {
     // A slug can collide with another dish if the name is changed to a duplicate.
-    const clash = await prisma.dish.findUnique({ where: { slug }, select: { id: true } });
+    const clash = await prisma.dish.findUnique({
+      where: { slug },
+      select: { id: true },
+    });
     if (clash && clash.id !== id) {
-      return { ok: false, message: "هذا الرابط محجوز لصنف آخر.", errors: { slug: "الرابط مستخدم." } };
+      return {
+        ok: false,
+        message: "هذا الرابط محجوز لصنف آخر.",
+        errors: { slug: "الرابط مستخدم." },
+      };
     }
     await prisma.dish.update({ where: { id }, data });
   } else {
     await prisma.dish.create({ data });
   }
 
-  revalidatePath("/admin/dishes");
-  revalidatePath("/menu");
-  revalidatePath("/");
+  invalidate(DISHES, ["/admin/dishes"]);
   return { ok: true, message: "تم الحفظ." };
 }
 
@@ -126,24 +187,44 @@ export async function deleteDish(formData: FormData): Promise<void> {
   // OrderItem.dishId is nullable with onDelete: SetNull, so history survives.
   await prisma.dish.delete({ where: { id } });
 
-  revalidatePath("/admin/dishes");
-  revalidatePath("/menu");
-  revalidatePath("/");
+  invalidate(DISHES, ["/admin/dishes"]);
   redirect("/admin/dishes");
 }
 
-export async function toggleDishAvailability(formData: FormData): Promise<void> {
+export async function toggleDishAvailability(
+  formData: FormData,
+): Promise<void> {
   await guard("/admin/dishes");
 
   const id = text(formData, "id");
   if (!id) return;
 
-  const dish = await prisma.dish.findUnique({ where: { id }, select: { available: true } });
+  const dish = await prisma.dish.findUnique({
+    where: { id },
+    select: { available: true },
+  });
   if (!dish) return;
 
-  await prisma.dish.update({ where: { id }, data: { available: !dish.available } });
-  revalidatePath("/admin/dishes");
-  revalidatePath("/menu");
+  await prisma.dish.update({
+    where: { id },
+    data: { available: !dish.available },
+  });
+  invalidate(DISHES, ["/admin/dishes"]);
+}
+
+/** Reorders a dish within its category. Lower comes first. */
+export async function updateDishOrder(formData: FormData): Promise<void> {
+  await guard("/admin/dishes");
+
+  const id = text(formData, "id");
+  if (!id) return;
+
+  await prisma.dish.update({
+    where: { id },
+    data: { sortOrder: parseSortOrder(formData.get("sortOrder")) },
+  });
+
+  invalidate(CATEGORIES, ["/admin/dishes"]);
 }
 
 export async function saveSpecial(
@@ -157,7 +238,8 @@ export async function saveSpecial(
   const errors: Record<string, string> = {};
 
   if (!dishId) errors.dishId = "اختر صنفًا.";
-  if (offerPrice === null || offerPrice <= 0) errors.offerPrice = "أدخل سعرًا صحيحًا.";
+  if (offerPrice === null || offerPrice <= 0)
+    errors.offerPrice = "أدخل سعرًا صحيحًا.";
 
   const dateValue = optional(formData, "expiresAt");
   let expiresAt: Date | null = null;
@@ -180,9 +262,7 @@ export async function saveSpecial(
     },
   });
 
-  revalidatePath("/admin/dishes");
-  revalidatePath("/specials");
-  revalidatePath("/menu");
+  invalidate(DISHES, ["/admin/dishes", "/specials"]);
   return { ok: true, message: "أُضيف العرض." };
 }
 
@@ -195,9 +275,7 @@ export async function endSpecial(formData: FormData): Promise<void> {
   // Deactivate rather than delete: past orders keep their historical price.
   await prisma.special.update({ where: { id }, data: { active: false } });
 
-  revalidatePath("/admin/dishes");
-  revalidatePath("/specials");
-  revalidatePath("/menu");
+  invalidate(DISHES, ["/admin/dishes", "/specials"]);
 }
 
 /* -------------------------------------------------------------- categories */
@@ -210,7 +288,11 @@ export async function saveCategory(
 
   const name = text(formData, "name");
   if (name.length < 2) {
-    return { ok: false, message: "أدخل اسم القسم.", errors: { name: "اسم القسم مطلوب." } };
+    return {
+      ok: false,
+      message: "أدخل اسم القسم.",
+      errors: { name: "اسم القسم مطلوب." },
+    };
   }
 
   const existing = await prisma.category.findMany({
@@ -220,7 +302,11 @@ export async function saveCategory(
   const id = text(formData, "id");
 
   if (existing.length > 0 && existing[0].id !== id) {
-    return { ok: false, message: "يوجد قسم بنفس الاسم.", errors: { name: "الاسم مستخدم." } };
+    return {
+      ok: false,
+      message: "يوجد قسم بنفس الاسم.",
+      errors: { name: "الاسم مستخدم." },
+    };
   }
 
   if (id) {
@@ -229,8 +315,7 @@ export async function saveCategory(
     await prisma.category.create({ data: { name } });
   }
 
-  revalidatePath("/admin/dishes");
-  revalidatePath("/menu");
+  invalidate(CATEGORIES, ["/admin/dishes"]);
   return { ok: true, message: "تم الحفظ." };
 }
 
@@ -255,11 +340,16 @@ function readHours(formData: FormData) {
 
     const { open, close } = read("");
     shop[String(day)] =
-      open && close && isValidTime(open) && isValidTime(close) ? { open, close } : null;
+      open && close && isValidTime(open) && isValidTime(close)
+        ? { open, close }
+        : null;
 
     const order = read("order");
     kitchen[String(day)] =
-      order.open && order.close && isValidTime(order.open) && isValidTime(order.close)
+      order.open &&
+      order.close &&
+      isValidTime(order.open) &&
+      isValidTime(order.close)
         ? { open: order.open, close: order.close }
         : null;
   }
@@ -280,7 +370,8 @@ export async function saveSettings(
 
   if (name.length < 2) errors.name = "أدخل اسم المحل.";
   if (address.length < 3) errors.address = "أدخل العنوان.";
-  if (whatsapp.replace(/\D/g, "").length < 9) errors.whatsapp = "أدخل رقم واتساب صحيحًا.";
+  if (whatsapp.replace(/\D/g, "").length < 9)
+    errors.whatsapp = "أدخل رقم واتساب صحيحًا.";
 
   const timezone = text(formData, "timezone") || "Asia/Jerusalem";
   try {
@@ -329,7 +420,7 @@ export async function saveSettings(
     },
   });
 
-  revalidatePath("/", "layout");
+  invalidate([TAG_SETTINGS, ...EVERYTHING], ["/admin/settings"]);
   return { ok: true, message: "حُفظت الإعدادات." };
 }
 
@@ -341,13 +432,17 @@ export async function saveAnnouncement(
 
   const body = text(formData, "body");
   if (body.length < 2) {
-    return { ok: false, message: "اكتب نص الإعلان.", errors: { body: "النص مطلوب." } };
+    return {
+      ok: false,
+      message: "اكتب نص الإعلان.",
+      errors: { body: "النص مطلوب." },
+    };
   }
 
   const active = formData.get("active") === "on";
   await prisma.announcement.create({ data: { body, active } });
 
-  revalidatePath("/", "layout");
+  invalidate([TAG_ANNOUNCEMENTS, ...EVERYTHING]);
   return { ok: true, message: "أُضيف الإعلان." };
 }
 
@@ -357,11 +452,17 @@ export async function toggleAnnouncement(formData: FormData): Promise<void> {
   const id = text(formData, "id");
   if (!id) return;
 
-  const row = await prisma.announcement.findUnique({ where: { id }, select: { active: true } });
+  const row = await prisma.announcement.findUnique({
+    where: { id },
+    select: { active: true },
+  });
   if (!row) return;
 
-  await prisma.announcement.update({ where: { id }, data: { active: !row.active } });
-  revalidatePath("/", "layout");
+  await prisma.announcement.update({
+    where: { id },
+    data: { active: !row.active },
+  });
+  invalidate([TAG_ANNOUNCEMENTS, ...EVERYTHING]);
 }
 
 export async function deleteAnnouncement(formData: FormData): Promise<void> {
@@ -371,5 +472,5 @@ export async function deleteAnnouncement(formData: FormData): Promise<void> {
   if (!id) return;
 
   await prisma.announcement.delete({ where: { id } });
-  revalidatePath("/", "layout");
+  invalidate([TAG_ANNOUNCEMENTS, ...EVERYTHING]);
 }

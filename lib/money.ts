@@ -9,6 +9,12 @@ export function toAgorot(shekel: number): number {
 
 /** Parses admin input like "39.5" or "39.50" into agorot. Returns null if unusable. */
 export function parseAgorot(input: string): number | null {
+  // Reject a negative sign before stripping. The strip below removes every
+  // character that is not a digit or a dot, which includes "-", so "-5" would
+  // otherwise be read as 5 and a mistyped negative price would silently become
+  // a positive one.
+  if (input.includes("-")) return null;
+
   const trimmed = input.trim().replace(/[^\d.]/g, "");
   if (!trimmed) return null;
   const value = Number(trimmed);

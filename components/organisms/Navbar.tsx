@@ -1,16 +1,15 @@
 import Link from "next/link";
 import { Icon } from "@/components/atoms/Icon";
 import { MobileNav, type NavLink } from "./MobileNav";
+import { AdminLink } from "@/components/molecules/AdminLink";
 import type { Settings } from "@/lib/settings";
 
 export type NavbarProps = {
   settings: Settings;
   links: NavLink[];
-  /** Rendered on the left (end) in RTL: admin link, cart, etc. */
-  isAdmin?: boolean;
 };
 
-export function Navbar({ settings, links, isAdmin = false }: NavbarProps) {
+export function Navbar({ settings, links }: NavbarProps) {
   const whatsappHref = `https://wa.me/${settings.whatsapp.replace(/[^\d]/g, "")}`;
 
   return (
@@ -38,15 +37,7 @@ export function Navbar({ settings, links, isAdmin = false }: NavbarProps) {
         </nav>
 
         <div className="ms-auto flex items-center gap-2 md:ms-0">
-          {isAdmin ? (
-            <Link
-              href="/admin"
-              aria-label="لوحة التحكم"
-              className="hidden size-11 items-center justify-center rounded-card border-2 border-line text-brand transition-colors hover:border-brand sm:flex"
-            >
-              <Icon name="dashboard" size={20} />
-            </Link>
-          ) : null}
+          <AdminLink variant="icon" />
 
           <a
             href={whatsappHref}
@@ -59,7 +50,7 @@ export function Navbar({ settings, links, isAdmin = false }: NavbarProps) {
           </a>
 
           <MobileNav
-            links={isAdmin ? [...links, { href: "/admin", label: "لوحة التحكم", icon: "dashboard" }] : links}
+            links={links}
             whatsappHref={whatsappHref}
             whatsappNumber={settings.whatsapp}
             siteName={settings.name}

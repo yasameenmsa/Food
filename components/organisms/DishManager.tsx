@@ -9,13 +9,69 @@ import { DishImage } from "@/components/molecules/DishImage";
 import { FormAlert } from "@/components/molecules/FormField";
 import { Input, Select } from "@/components/atoms/Field";
 import { DishForm } from "./DishForm";
-import { deleteDish, saveSpecial, endSpecial, toggleDishAvailability } from "@/app/admin/actions";
+import {
+  deleteDish,
+  saveSpecial,
+  endSpecial,
+  toggleDishAvailability,
+  updateDishOrder,
+} from "@/app/admin/actions";
 import type { CategoryDTO, DishDTO, FormState } from "@/types";
 
-function SpecialForm({ dishes, currency }: { dishes: DishDTO[]; currency: string }) {
-  const [state, formAction, pending] = useActionState<FormState, FormData>(saveSpecial, {
-    ok: false,
-  });
+/**
+ * Move a dish up or down within its category.
+ *
+ * Drag-and-drop was rejected here on purpose: the owner may well be editing on a
+ * phone, where a drag handle is fiddly and these buttons are not. Reordering is
+ * expressed as `sortOrder - 1` / `sortOrder + 1`, so two dishes can briefly
+ * share a position — `id` is the tiebreak in the query, which keeps the result
+ * stable rather than shuffling.
+ */
+function OrderControls({ dish }: { dish: DishDTO }) {
+  return (
+    <div className="flex items-center gap-1 text-xs text-muted">
+      <span className="font-bold text-foreground/70">الترتيب</span>
+      <form action={updateDishOrder}>
+        <input type="hidden" name="id" value={dish.id} />
+        <input type="hidden" name="sortOrder" value={dish.sortOrder - 1} />
+        <button
+          type="submit"
+          disabled={dish.sortOrder <= 0}
+          aria-label={`تقديم ${dish.name} في القائمة`}
+          className="inline-flex size-8 items-center justify-center rounded-card transition-colors hover:bg-stone/40 disabled:opacity-30"
+        >
+          <Icon name="chevronUp" size={16} />
+        </button>
+      </form>
+      <span className="nums w-6 text-center font-bold">{dish.sortOrder}</span>
+      <form action={updateDishOrder}>
+        <input type="hidden" name="id" value={dish.id} />
+        <input type="hidden" name="sortOrder" value={dish.sortOrder + 1} />
+        <button
+          type="submit"
+          aria-label={`تأخير ${dish.name} في القائمة`}
+          className="inline-flex size-8 items-center justify-center rounded-card transition-colors hover:bg-stone/40"
+        >
+          <Icon name="chevronDown" size={16} />
+        </button>
+      </form>
+    </div>
+  );
+}
+
+function SpecialForm({
+  dishes,
+  currency,
+}: {
+  dishes: DishDTO[];
+  currency: string;
+}) {
+  const [state, formAction, pending] = useActionState<FormState, FormData>(
+    saveSpecial,
+    {
+      ok: false,
+    },
+  );
 
   return (
     <form
@@ -26,7 +82,9 @@ function SpecialForm({ dishes, currency }: { dishes: DishDTO[]; currency: string
 
       {state.message ? (
         <div className="mt-3">
-          <FormAlert tone={state.ok ? "success" : "danger"}>{state.message}</FormAlert>
+          <FormAlert tone={state.ok ? "success" : "danger"}>
+            {state.message}
+          </FormAlert>
         </div>
       ) : null}
 
@@ -48,8 +106,16 @@ function SpecialForm({ dishes, currency }: { dishes: DishDTO[]; currency: string
           inputMode="decimal"
           error={state.errors?.offerPrice}
         />
-        <Input label="نص العرض (اختياري)" name="label" placeholder="عرض العشاء" />
-        <Input label="ينتهي في (اختياري)" name="expiresAt" type="datetime-local" />
+        <Input
+          label="نص العرض (اختياري)"
+          name="label"
+          placeholder="عرض العشاء"
+        />
+        <Input
+          label="ينتهي في (اختياري)"
+          name="expiresAt"
+          type="datetime-local"
+        />
       </div>
 
       <Button type="submit" size="sm" loading={pending} className="mt-3">
@@ -96,7 +162,8 @@ export function DishManager({
                 <div className="min-w-0">
                   <h3 className="font-bold leading-snug">{dish.name}</h3>
                   <p className="mt-0.5 text-xs text-muted">
-                    {dish.categoryName} · <span className="ltr-run">{dish.slug}</span>
+                    {dish.categoryName} ·{" "}
+                    <span className="ltr-run">{dish.slug}</span>
                   </p>
                 </div>
                 <div className="flex flex-wrap gap-1.5">
@@ -109,9 +176,11 @@ export function DishManager({
               </div>
 
               <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
+                <OrderControls dish={dish} />
+
                 <PriceTag
-                  price={dish.price}
-                  originalPrice={dish.special ? dish.special.offerPrice : null}
+                  price={dish.currentPrice}
+                  originalPrice={dish.special ? dish.price : null}
                   currency={currency}
                   size="sm"
                 />
@@ -182,7 +251,11 @@ export function DishManager({
         {showSpecialForm ? (
           <SpecialForm dishes={dishes} currency={currency} />
         ) : (
-          <Button variant="secondary" className="w-full" onClick={() => setShowSpecialForm(true)}>
+          <Button
+            variant="secondary"
+            className="w-full"
+            onClick={() => setShowSpecialForm(true)}
+          >
             <Icon name="flame" size={18} />
             إدارة العروض
           </Button>

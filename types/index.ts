@@ -20,6 +20,7 @@ export type SpecialDTO = {
   id: string;
   offerPrice: number;
   label: string | null;
+  /** ISO date, for the "ends soon" hint in the admin list. */
   expiresAt: string | null;
 };
 
@@ -35,6 +36,8 @@ export type DishDTO = {
   special: SpecialDTO | null;
   available: boolean;
   featured: boolean;
+  /** Position within the category. Lower comes first. */
+  sortOrder: number;
   categoryId: string;
   categoryName: string;
   image: ImageDTO | null;

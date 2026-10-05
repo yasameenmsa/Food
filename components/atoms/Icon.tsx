@@ -6,6 +6,7 @@ import {
   ChevronDown,
   ChevronLeft,
   ChevronRight,
+  ChevronUp,
   Clock,
   Copy,
   ExternalLink,
@@ -51,6 +52,7 @@ const LUCIDE: Record<string, LucideIcon> = {
   chevronDown: ChevronDown,
   chevronLeft: ChevronLeft,
   chevronRight: ChevronRight,
+  chevronUp: ChevronUp,
   clock: Clock,
   copy: Copy,
   external: ExternalLink,
@@ -99,7 +101,12 @@ export type IconProps = {
   decorative?: boolean;
 };
 
-export function Icon({ name, size = 20, className = "", decorative = true }: IconProps) {
+export function Icon({
+  name,
+  size = 20,
+  className = "",
+  decorative = true,
+}: IconProps) {
   const flip = DIRECTIONAL.has(name) ? "rtl:rotate-180" : "";
   const classes = `${flip} shrink-0 ${className}`;
 

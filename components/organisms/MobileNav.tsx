@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Icon, type IconName } from "@/components/atoms/Icon";
+import { AdminLink } from "@/components/molecules/AdminLink";
 
 export type NavLink = {
   href: string;
@@ -127,6 +128,7 @@ export function MobileNav({
                   </Link>
                 </li>
               ))}
+              <AdminLink variant="drawer" />
             </ul>
 
             {whatsappHref && whatsappNumber ? (

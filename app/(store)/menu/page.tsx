@@ -11,7 +11,15 @@ import {
 import { getCategories, getDishes } from "@/lib/dishes";
 import { getSettings, whatsappLink } from "@/lib/settings";
 import { dishLink, dishMessage } from "@/lib/whatsapp";
+import { siteUrl } from "@/lib/site";
 import { notFound } from "next/navigation";
+
+/**
+ * ISR window. Every admin write calls `revalidateTag` so this is only the
+ * backstop for a change that happens outside the admin — an edited row, or a
+ * deploy. One hour keeps a stale menu from outliving its usefulness.
+ */
+export const revalidate = 3600;
 
 export const metadata: Metadata = {
   title: "القائمة",
@@ -43,7 +51,7 @@ export default async function MenuPage({ searchParams }: PageProps<"/menu">) {
     notFound();
   }
 
-  const origin = process.env.NEXT_PUBLIC_SITE_URL ?? "https://alzaytona.example";
+  const origin = siteUrl();
 
   const hrefFor = (dish: (typeof result.dishes)[number]) =>
     dish.available

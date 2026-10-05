@@ -11,6 +11,15 @@ import {
 import { getOpenState, describeNextChange } from "@/lib/hours";
 import { getSettings, whatsappDigits, whatsappLink } from "@/lib/settings";
 import { dishLink, dishMessage } from "@/lib/whatsapp";
+import { restaurantJsonLd } from "@/lib/jsonld";
+import { siteUrl } from "@/lib/site";
+
+/**
+ * ISR window. Every admin write calls `revalidateTag` so this is only the
+ * backstop for a change that happens outside the admin — an edited row, or a
+ * deploy. One hour keeps a stale menu from outliving its usefulness.
+ */
+export const revalidate = 3600;
 
 export default async function HomePage() {
   const [settings, categories, featured, specials] = await Promise.all([
@@ -26,7 +35,7 @@ export default async function HomePage() {
     ? null
     : describeNextChange(settings.orderingHours, now, settings.timezone, "kitchen");
 
-  const origin = process.env.NEXT_PUBLIC_SITE_URL ?? "https://alzaytona.example";
+  const origin = siteUrl();
   const whatsappHref = whatsappLink(settings.whatsapp, "مرحبًا! أودّ الطلب من معجنات الزيتونة.");
 
   const hrefFor = (dish: (typeof featured)[number]) =>
@@ -43,6 +52,11 @@ export default async function HomePage() {
 
   return (
     <>
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(restaurantJsonLd(settings)) }}
+      />
+
       <Hero
         settings={settings}
         whatsappHref={whatsappHref}

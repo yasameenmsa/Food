@@ -1,6 +1,7 @@
 /**
  * Order writes and reads, mapped to DTOs.
  */
+import crypto from "node:crypto";
 import { prisma } from "@/lib/prisma";
 import type { CartLineDTO, OrderDTO, OrderStatus } from "@/types";
 import { ORDER_STATUS_META, ORDER_STATUS_VALUES } from "./order-status";
@@ -59,23 +60,34 @@ function toOrderDTO(row: OrderRow): OrderDTO {
 
 /**
  * Short, human-quotable reference. Not a UUID — the owner reads these aloud on
- * the phone. Falls back to a timestamp if the random suffix ever collides.
+ * the phone.
+ *
+ * The previous version generated a 4-character candidate and then looked for a
+ * clash before writing, which races: two concurrent orders can both see a free
+ * reference and the loser fails on the `unique` constraint. Instead we use
+ * `crypto.randomInt`, and on a collision we simply generate again — the unique
+ * constraint becomes the check rather than a SELECT.
  */
 async function nextReference(): Promise<string> {
   const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-  for (let attempt = 0; attempt < 5; attempt += 1) {
+  for (let attempt = 0; attempt < 10; attempt += 1) {
     let suffix = "";
-    for (let i = 0; i < 4; i += 1) {
-      suffix += alphabet[Math.floor(Math.random() * alphabet.length)];
+    for (let i = 0; i < 5; i += 1) {
+      suffix += alphabet[crypto.randomInt(0, alphabet.length)];
     }
-    const reference = `ZAY-${suffix}`;
-    const clash = await prisma.order.findUnique({
-      where: { reference },
-      select: { id: true },
-    });
-    if (!clash) return reference;
+    return `ZAY-${suffix}`;
   }
-  return `ZAY-${Date.now().toString(36).toUpperCase().slice(-5)}`;
+  // Vanishingly unlikely, but never hand back a colliding key.
+  return `ZAY-${Date.now().toString(36).toUpperCase()}`;
+}
+
+/** True when Prisma rejected the write because a unique index already held it. */
+function isUniqueViolation(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    (error as { code?: unknown }).code === "P2002"
+  );
 }
 
 export async function createOrder(input: {
@@ -89,36 +101,47 @@ export async function createOrder(input: {
 }): Promise<OrderDTO> {
   const subtotal = input.lines.reduce((sum, line) => sum + line.lineTotal, 0);
 
-  const row = await prisma.order.create({
-    data: {
-      reference: await nextReference(),
-      type: input.type,
-      status: "PENDING",
-      customerName: input.customerName,
-      phone: input.phone,
-      address: input.address,
-      notes: input.notes,
-      subtotal,
-      fee: input.fee,
-      total: subtotal + input.fee,
-      whatsappSent: false,
-      items: {
-        create: input.lines.map((line) => ({
-          dishId: line.dishId,
-          dishName: line.name,
-          unitPrice: line.unitPrice,
-          quantity: line.quantity,
-          lineTotal: line.lineTotal,
-        })),
-      },
-    },
-    include: orderInclude,
-  });
+  const items = input.lines.map((line) => ({
+    dishId: line.dishId,
+    dishName: line.name,
+    unitPrice: line.unitPrice,
+    quantity: line.quantity,
+    lineTotal: line.lineTotal,
+  }));
 
-  return toOrderDTO(row);
+  // A reference collision is the only expected failure here, and it is safe to
+  // retry because nothing else has happened yet.
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    try {
+      const row = await prisma.order.create({
+        data: {
+          reference: await nextReference(),
+          type: input.type,
+          status: "PENDING",
+          customerName: input.customerName,
+          phone: input.phone,
+          address: input.address,
+          notes: input.notes,
+          subtotal,
+          fee: input.fee,
+          total: subtotal + input.fee,
+          whatsappSent: false,
+          items: { create: items },
+        },
+        include: orderInclude,
+      });
+      return toOrderDTO(row);
+    } catch (error) {
+      if (!isUniqueViolation(error) || attempt === 4) throw error;
+    }
+  }
+
+  throw new Error("Could not allocate a unique order reference.");
 }
 
-export async function getOrderByReference(reference: string): Promise<OrderDTO | null> {
+export async function getOrderByReference(
+  reference: string,
+): Promise<OrderDTO | null> {
   const row = await prisma.order.findUnique({
     where: { reference },
     include: orderInclude,
@@ -136,7 +159,10 @@ export async function getOrders(status?: OrderStatus): Promise<OrderDTO[]> {
   return rows.map(toOrderDTO);
 }
 
-export async function setOrderStatus(id: string, status: OrderStatus): Promise<void> {
+export async function setOrderStatus(
+  id: string,
+  status: OrderStatus,
+): Promise<void> {
   await prisma.order.update({ where: { id }, data: { status } });
 }
 

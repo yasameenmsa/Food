@@ -1,6 +1,12 @@
-import { cache } from "react";
+import { tagged } from "@/lib/cached";
 import { prisma } from "@/lib/prisma";
-import { DEFAULT_HOURS, parseHours, type DayWindow, type HoursMap } from "@/lib/hours";
+import { TAG_CATALOG, TAG_SETTINGS } from "@/lib/cache-tags";
+import {
+  DEFAULT_HOURS,
+  parseHours,
+  type DayWindow,
+  type HoursMap,
+} from "@/lib/hours";
 
 export type Settings = {
   name: string;
@@ -27,10 +33,14 @@ export type Settings = {
 };
 
 /**
- * Deduplicated per request. Always returns a usable object so pages never have
- * to null-check, even before the owner has filled anything in.
+ * Always returns a usable object so pages never have to null-check, even before
+ * the owner has filled anything in.
+ *
+ * Tagged rather than merely request-deduplicated: the storefront is now ISR, so
+ * the value has to survive between requests and be invalidated by
+ * `revalidateTag` when the owner edits anything in /admin/settings.
  */
-export const getSettings = cache(async (): Promise<Settings> => {
+export const getSettings = tagged(async (): Promise<Settings> => {
   const row = await prisma.settings.findUnique({
     where: { id: "default" },
     include: { logoImage: true },
@@ -88,7 +98,7 @@ export const getSettings = cache(async (): Promise<Settings> => {
     openingHours: Object.keys(opening).length ? opening : DEFAULT_HOURS,
     orderingHours: Object.keys(ordering).length ? ordering : DEFAULT_HOURS,
   };
-});
+}, [TAG_SETTINGS, TAG_CATALOG]);
 
 /** Normalises a phone number into the digits wa.me expects (no +, no spaces). */
 export function whatsappDigits(whatsapp: string): string {

@@ -40,10 +40,10 @@ model Settings {
   tiktok    String?
   email     String?
   mapUrl    String?
-currency    String @default("₪")
+  currency  String  @default("₪")
 
   /// IANA zone used for every "open now" calculation, e.g. Asia/Jerusalem.
-  timezone    String @default("Asia/Jerusalem")
+  timezone String @default("Asia/Jerusalem")
 
   /// { "0": { "open": "10:00", "close": "23:00" }, ... } keyed by JS day 0=Sunday.
   /// A day set to null is closed.
@@ -81,19 +81,26 @@ model Dish {
 
   name        String
   /// URL segment for /menu/[slug]. Latin where possible so links stay readable.
-  slug        String   @unique
+  slug        String  @unique
   description String?
   /// Price in agorot.
   price       Int
-  /// Optional discounted price in agorot, used while an active Special exists.
-  offerPrice  Int?
+
+  /// `name` + `description` folded by lib/search.ts. Matches orthographic
+  /// variants ("مشكله" finds "المشكلة"), which Postgres `insensitive` cannot do
+  /// because Arabic has no case. Maintained on every write; never edited by hand.
+  searchKey String @default("")
 
   imageId String?
   image   Image?  @relation("DishPhoto", fields: [imageId], references: [id], onDelete: SetNull)
 
   available Boolean @default(true)
   featured  Boolean @default(false)
-  sortOrder Int     @default(0)
+
+  /// Position within the category. Lower comes first. Owner-controlled — this
+  /// was previously never written by any code path and was discarded when the
+  /// menu was sorted, so menu order was effectively random.
+  sortOrder Int @default(0)
 
   specials   Special[]
   orderItems OrderItem[]
@@ -104,6 +111,27 @@ model Dish {
   @@index([categoryId, sortOrder])
   @@index([featured])
   @@index([available])
+}
+
+/// Failed admin logins, for rate limiting. One row per client per window.
+///
+/// The IP is hashed with SESSION_SECRET before storage — a login attempt table
+/// should not become a log of who connected to the shop.
+model LoginAttempt {
+  id String @id @default(cuid())
+
+  /// SHA-256 of the client IP, keyed with SESSION_SECRET.
+  ipHash String
+
+  /// Inclusive lower bound of the current counting window.
+  windowStart DateTime @default(now())
+
+  /// Consecutive failures in this window. Reset to 0 on a successful login.
+  attempts Int @default(0)
+
+  updatedAt DateTime @updatedAt
+
+  @@index([ipHash, windowStart])
 }
 
 /// A time-boxed discounted price on a dish.

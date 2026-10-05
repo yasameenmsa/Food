@@ -15,6 +15,8 @@ const EMPTY = {
   description: "",
   price: "",
   categoryId: "",
+  sortOrder: "0",
+  alt: "",
 };
 
 function initialValue(dish: DishDTO | null, categories: CategoryDTO[]) {
@@ -28,6 +30,8 @@ function initialValue(dish: DishDTO | null, categories: CategoryDTO[]) {
     description: dish.description ?? "",
     price: String(dish.price / 100),
     categoryId: dish.categoryId,
+    sortOrder: String(dish.sortOrder),
+    alt: dish.image?.alt ?? "",
   };
 }
 
@@ -115,6 +119,57 @@ export function DishForm({
           rows={3}
           defaultValue={initial.description}
           error={state.errors?.description}
+        />
+
+        <div className="rounded-card border-2 border-dashed border-line p-4">
+          <div className="flex items-start gap-4">
+            {dish?.image ? (
+              <div className="size-24 shrink-0 overflow-hidden rounded-card border border-line">
+                {/* Plain <img>: this is the admin preview of an arbitrary upload,
+                    and next/image would add nothing here. */}
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={dish.image.src}
+                  alt={dish.image.alt}
+                  width={96}
+                  height={96}
+                  className="size-full object-cover"
+                />
+              </div>
+            ) : null}
+
+            <div className="min-w-0 flex-1">
+              <Input
+                label={dish?.image ? "استبدال الصورة" : "صورة الصنف"}
+                name="photo"
+                type="file"
+                accept="image/jpeg,image/png,image/webp,image/avif"
+                hint="JPG أو PNG أو WebP، حتى ٢ ميجابايت."
+                error={state.errors?.photo}
+              />
+              <div className="mt-3">
+                <Input
+                  label="وصف الصورة لقارئ الشاشة (اختياري)"
+                  name="alt"
+                  defaultValue={initial.alt}
+                  hint="إذا تُرك فارغًا يُستخدم اسم الصنف."
+                />
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <Input
+          label="الترتيب داخل القسم"
+          name="sortOrder"
+          type="number"
+          min="0"
+          max="9999"
+          step="1"
+          inputMode="numeric"
+          defaultValue={initial.sortOrder}
+          hint="الأصغر يظهر أولًا."
+          error={state.errors?.sortOrder}
         />
 
         <div className="flex flex-wrap gap-5">
