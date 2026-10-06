@@ -5,6 +5,7 @@ import { Badge } from "@/components/atoms/Badge";
 import { Icon } from "@/components/atoms/Icon";
 import { PriceTag } from "@/components/molecules/PriceTag";
 import { updateOrderStatus, flagWhatsappSent } from "@/app/admin/actions";
+import { formatDateTime } from "@/lib/datetime";
 import { ORDER_STATUS_META } from "@/lib/order-status";
 import type { OrderDTO, OrderStatus } from "@/types";
 
@@ -21,7 +22,6 @@ function OrderCard({ order, currency }: { order: OrderDTO; currency: string }) {
   );
 
   const meta = ORDER_STATUS_META[optimistic.status];
-  const created = new Date(optimistic.createdAt);
 
   return (
     <article className="rounded-lg border border-line bg-surface p-5 shadow-brand">
@@ -29,11 +29,7 @@ function OrderCard({ order, currency }: { order: OrderDTO; currency: string }) {
         <div>
           <p className="font-display text-xl leading-none">{optimistic.reference}</p>
           <p className="mt-1 text-sm text-muted">
-            {created.toLocaleDateString("ar-EG", {
-              dateStyle: "medium",
-              timeStyle: "short",
-              timeZone: "Asia/Jerusalem",
-            })}
+            {formatDateTime(optimistic.createdAt)}
           </p>
         </div>
         <Badge tone={meta.tone}>{meta.label}</Badge>
